@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: "test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -v
+
+  lint:
+    name: "Lint and type check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: "Run ruff (lint check)"
+        run: ruff check .
+
+      - name: "Run mypy (strict)"
+        run: mypy
+
+  smoke:
+    name: "Smoke test: scan and apply on generated images"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Generate a small image set with duplicates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+
+          out = Path("smoke_images")
+          out.mkdir(exist_ok=True)
+
+          def pattern(size=(200, 200), seed=0):
+              import random
+              rng = random.Random(seed)
+              img = Image.new("RGB", size, (255, 255, 255))
+              px = img.load()
+              for y in range(size[1]):
+                  shade = int(255 * y / max(1, size[1] - 1))
+                  for x in range(size[0]):
+                      px[x, y] = (shade, 255 - shade, (shade * 7) % 256)
+              draw = ImageDraw.Draw(img)
+              for _ in range(6):
+                  x0, y0 = rng.randint(0, size[0] - 1), rng.randint(0, size[1] - 1)
+                  w, h = rng.randint(10, 60), rng.randint(10, 60)
+                  color = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
+                  draw.rectangle([x0, y0, min(size[0]-1, x0+w), min(size[1]-1, y0+h)], fill=color)
+              return img
+
+          base = pattern(seed=1)
+          base.save(out / "photo.png")
+          base.save(out / "photo_copy.png")
+          base.resize((100, 100)).save(out / "photo_small.png")
+          base.save(out / "photo_recompressed.jpg", format="JPEG", quality=40)
+          pattern(seed=999).save(out / "unrelated.png")
+          print("generated", sorted(p.name for p in out.iterdir()))
+          PY
+
+      - name: Scan for duplicates
+        run: |
+          img-dedupe scan smoke_images --extensions png,jpg --threshold 12 -o smoke_manifest.json
+          cat smoke_manifest.json
+
+      - name: Verify manifest found the expected duplicate group
+        run: |
+          python - <<'PY'
+          import json
+          data = json.load(open("smoke_manifest.json"))
+          assert data["summary"]["total_images"] == 5, data["summary"]
+          assert data["summary"]["duplicate_groups"] == 1, data["summary"]
+          group = data["groups"][0]
+          removal_paths = {m["path"] for m in group["members"] if m["action"] == "delete_candidate"}
+          assert len(removal_paths) == 3, removal_paths
+          print("manifest looks correct")
+          PY
+
+      - name: Apply the manifest (dry run first, then execute)
+        run: |
+          img-dedupe apply smoke_manifest.json
+          img-dedupe apply smoke_manifest.json --execute
+
+      - name: Verify duplicates were removed and unrelated image survived
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          remaining = sorted(p.name for p in Path("smoke_images").iterdir())
+          assert "unrelated.png" in remaining, remaining
+          assert "photo_copy.png" not in remaining, remaining
+          assert "photo_small.png" not in remaining, remaining
+          assert len(remaining) == 2, remaining
+          print("apply result looks correct:", remaining)
+          PY
