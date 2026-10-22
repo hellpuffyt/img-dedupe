@@ -102,10 +102,15 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     for line in log:
         print(line)
 
+    # Count what was (or would be) done, not what was planned: safety
+    # checks may have skipped some actions.
+    done = sum(1 for line in log if not line.startswith("SKIP"))
+    skipped = len(log) - done
+    note = f" ({skipped} skipped)" if skipped else ""
     if not args.execute:
-        print(f"\nDry run: {len(plan.actions)} file(s) would be affected. Re-run with --execute to apply.")
+        print(f"\nDry run: {done} file(s) would be affected{note}. Re-run with --execute to apply.")
     else:
-        print(f"\nApplied: {len(plan.actions)} file(s) affected.")
+        print(f"\nApplied: {done} file(s) affected{note}.")
     return 0
 
 
