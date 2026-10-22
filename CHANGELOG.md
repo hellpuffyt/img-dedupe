@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Trash names are now made unique.
 - A candidate that is the same file as a kept member (e.g. via a symlink), or
   whose bytes changed since the scan (recorded `sha256`), is now skipped.
+- The apply summary counted planned actions as "affected" even when skipped;
+  it now counts performed ones and reports skips.
 
 ### Changed
 
