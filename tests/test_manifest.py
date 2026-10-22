@@ -95,6 +95,8 @@ def test_build_apply_plan_with_trash_dir_builds_trash_actions(tmp_path: Path) ->
 def test_apply_plan_dry_run_does_not_touch_filesystem(tmp_path: Path) -> None:
     victim = tmp_path / "dupe.png"
     victim.write_bytes(b"fake image bytes")
+    # The kept copy must exist: apply never removes the last copy.
+    (tmp_path / "keep.png").write_bytes(b"kept image bytes")
     data = _manifest_with_group(
         [
             {"path": str(tmp_path / "keep.png"), "action": "keep"},
@@ -110,6 +112,8 @@ def test_apply_plan_dry_run_does_not_touch_filesystem(tmp_path: Path) -> None:
 def test_apply_plan_execute_deletes_file(tmp_path: Path) -> None:
     victim = tmp_path / "dupe.png"
     victim.write_bytes(b"fake image bytes")
+    # The kept copy must exist: apply never removes the last copy.
+    (tmp_path / "keep.png").write_bytes(b"kept image bytes")
     data = _manifest_with_group(
         [
             {"path": str(tmp_path / "keep.png"), "action": "keep"},
@@ -124,6 +128,8 @@ def test_apply_plan_execute_deletes_file(tmp_path: Path) -> None:
 def test_apply_plan_execute_moves_file_to_trash(tmp_path: Path) -> None:
     victim = tmp_path / "dupe.png"
     victim.write_bytes(b"fake image bytes")
+    # The kept copy must exist: apply never removes the last copy.
+    (tmp_path / "keep.png").write_bytes(b"kept image bytes")
     trash_dir = tmp_path / "trash"
     data = _manifest_with_group(
         [
@@ -184,3 +190,97 @@ def test_multiple_groups_only_offending_one_raises(tmp_path: Path) -> None:
     }
     with pytest.raises(ManifestError):
         build_apply_plan(data)
+
+
+# --- audit regressions: apply must never lose the last copy -----------------
+
+
+def _pair(tmp_path: Path, keep_name: str = "keep.png") -> tuple[Path, Path]:
+    keep = tmp_path / keep_name
+    victim = tmp_path / "dupe.png"
+    keep.write_bytes(b"kept image bytes")
+    victim.write_bytes(b"duplicate image bytes")
+    return keep, victim
+
+
+def test_apply_skips_a_group_whose_kept_copy_is_gone(tmp_path: Path) -> None:
+    # The kept file was moved away after the scan; deleting the candidate
+    # would have removed the only remaining copy.
+    keep, victim = _pair(tmp_path)
+    keep.unlink()
+    data = _manifest_with_group(
+        [
+            {"path": str(keep), "action": "keep"},
+            {"path": str(victim), "action": "delete_candidate"},
+        ]
+    )
+    log = apply_plan(build_apply_plan(data), execute=True)
+    assert victim.exists()
+    assert any("no kept member" in line for line in log)
+
+
+def test_apply_skips_a_candidate_that_is_the_kept_file(tmp_path: Path) -> None:
+    keep, _ = _pair(tmp_path)
+    alias = tmp_path / "alias.png"
+    alias.symlink_to(keep)
+    data = _manifest_with_group(
+        [
+            {"path": str(alias), "action": "keep"},
+            {"path": str(keep), "action": "delete_candidate"},
+        ]
+    )
+    log = apply_plan(build_apply_plan(data), execute=True)
+    assert keep.exists()
+    assert any("same file as a kept member" in line for line in log)
+
+
+def test_apply_skips_a_file_changed_since_the_scan(tmp_path: Path) -> None:
+    keep, victim = _pair(tmp_path)
+    data = _manifest_with_group(
+        [
+            {"path": str(keep), "action": "keep"},
+            {"path": str(victim), "action": "delete_candidate", "sha256": "0" * 64},
+        ]
+    )
+    log = apply_plan(build_apply_plan(data), execute=True)
+    assert victim.exists()
+    assert any("changed since the scan" in line for line in log)
+
+
+def test_apply_deletes_when_recorded_sha256_still_matches(tmp_path: Path) -> None:
+    import hashlib
+
+    keep, victim = _pair(tmp_path)
+    digest = hashlib.sha256(victim.read_bytes()).hexdigest()
+    data = _manifest_with_group(
+        [
+            {"path": str(keep), "action": "keep"},
+            {"path": str(victim), "action": "delete_candidate", "sha256": digest},
+        ]
+    )
+    apply_plan(build_apply_plan(data), execute=True)
+    assert not victim.exists()
+
+
+def test_trash_never_overwrites_a_same_named_member(tmp_path: Path) -> None:
+    # a/photo.png and b/photo.png in one group both went to
+    # trash/group_0/photo.png; the second move overwrote the first.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first = tmp_path / "a" / "photo.png"
+    second = tmp_path / "b" / "photo.png"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    keep = tmp_path / "keep.png"
+    keep.write_bytes(b"kept")
+    trash = tmp_path / "trash"
+    data = _manifest_with_group(
+        [
+            {"path": str(keep), "action": "keep"},
+            {"path": str(first), "action": "delete_candidate"},
+            {"path": str(second), "action": "delete_candidate"},
+        ]
+    )
+    apply_plan(build_apply_plan(data, trash_dir=trash), execute=True)
+    moved = sorted(p.read_bytes() for p in (trash / "group_0").iterdir())
+    assert moved == [b"first", b"second"]
