@@ -97,6 +97,7 @@ Requires Python 3.10+. Not published on PyPI; install from a clone:
 
 ```bash
 git clone https://github.com/hellpuffyt/img-dedupe && cd img-dedupe
+python -m venv .venv && . .venv/bin/activate
 pip install -e .
 ```
 
