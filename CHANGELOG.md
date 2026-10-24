@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The `oldest` keep reason printed negated mtimes (the internal ranking key)
+  instead of the files' real modification times.
+
 ### Fixed (data loss in `apply --execute`)
 
 - A group was applied even when its kept file had been moved or deleted since

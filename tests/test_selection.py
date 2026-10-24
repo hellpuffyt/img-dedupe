@@ -62,6 +62,9 @@ def test_oldest_strategy_prefers_smaller_mtime() -> None:
     newer = _meta("new.png", mtime=99999.0)
     result = select_best([older, newer], strategy_order=("oldest",))
     assert result.best is older
+    # The reason must quote the real mtimes, not the negated ranking key.
+    assert "mtime 100.0 vs 99999.0" in result.reason
+    assert "-" not in result.reason.split("mtime", 1)[1]
 
 
 def test_newest_strategy_prefers_larger_mtime() -> None:
