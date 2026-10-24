@@ -128,3 +128,32 @@ def test_cli_scan_custom_extensions_and_strategy_order(tmp_path: Path) -> None:
     data = json.loads(manifest_path.read_text())
     assert data["settings"]["algorithm"] == "dhash"
     assert data["settings"]["strategy_order"] == ["file_size", "resolution", "oldest"]
+
+
+def test_cli_apply_summary_counts_skipped_removals(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    # The summary used to report every planned action as "affected", even
+    # ones the safety checks skipped.
+    keep = tmp_path / "keep.png"
+    victim = tmp_path / "dupe.png"
+    victim.write_bytes(b"bytes")
+    manifest = tmp_path / "m.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "groups": [
+                    {
+                        "group_id": 0,
+                        "members": [
+                            {"path": str(keep), "action": "keep"},
+                            {"path": str(victim), "action": "delete_candidate"},
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    assert main(["apply", str(manifest), "--execute"]) == 0
+    out = capsys.readouterr().out
+    assert victim.exists()
+    assert "Applied: 0 file(s) affected (1 skipped)." in out

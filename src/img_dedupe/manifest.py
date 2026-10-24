@@ -10,10 +10,13 @@ should never leave zero copies of an image.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from img_dedupe.metadata import sha256_of_file
 
 
 class ManifestError(ValueError):
@@ -26,6 +29,12 @@ class ApplyAction:
     path: Path
     kind: str  # "delete" or "trash"
     trash_destination: Path | None = None
+    #: The group's members marked "keep"; a removal is only performed while
+    #: at least one of them still exists and is a different file.
+    kept_paths: tuple[Path, ...] = ()
+    #: sha256 recorded at scan time; a file whose bytes changed since the
+    #: scan is skipped rather than removed on stale evidence.
+    expected_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,15 +97,20 @@ def build_apply_plan(data: dict[str, Any], trash_dir: Path | None = None) -> App
                 "refusing to remove an entire group. Mark at least one member 'keep'."
             )
 
+        kept = tuple(Path(m["path"]) for m in members if m["action"] == "keep")
         for member in members:
             if member["action"] != "delete_candidate":
                 continue
             src = Path(member["path"])
+            sha = member.get("sha256")
+            expected = sha if isinstance(sha, str) else None
             if trash_dir is not None:
                 trash_destination = trash_dir / f"group_{group_id}" / src.name
-                actions.append(ApplyAction(group_id, src, "trash", trash_destination))
+                actions.append(
+                    ApplyAction(group_id, src, "trash", trash_destination, kept, expected)
+                )
             else:
-                actions.append(ApplyAction(group_id, src, "delete"))
+                actions.append(ApplyAction(group_id, src, "delete", None, kept, expected))
 
     return ApplyPlan(actions=actions, skipped_groups=skipped)
 
@@ -112,14 +126,49 @@ def apply_plan(plan: ApplyPlan, execute: bool = False) -> list[str]:
         if not action.path.exists():
             log.append(f"SKIP (missing) {action.path}")
             continue
+        reason = _unsafe_reason(action)
+        if reason is not None:
+            log.append(f"SKIP ({reason}) {action.path}")
+            continue
         if action.kind == "trash":
             assert action.trash_destination is not None
-            log.append(f"{'MOVE' if execute else 'WOULD MOVE'} {action.path} -> {action.trash_destination}")
+            destination = _free_destination(action.trash_destination)
+            log.append(f"{'MOVE' if execute else 'WOULD MOVE'} {action.path} -> {destination}")
             if execute:
-                action.trash_destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(action.path), str(action.trash_destination))
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(action.path), str(destination))
         else:
             log.append(f"{'DELETE' if execute else 'WOULD DELETE'} {action.path}")
             if execute:
                 action.path.unlink()
     return log
+
+
+def _unsafe_reason(action: ApplyAction) -> str | None:
+    """Why removing ``action.path`` now would risk losing the last copy, if so."""
+    existing_kept = [k for k in action.kept_paths if k.exists()]
+    if action.kept_paths and not existing_kept:
+        return f"no kept member of group {action.group_id} exists on disk"
+    if any(os.path.samefile(k, action.path) for k in existing_kept):
+        return "same file as a kept member"
+    if (
+        action.expected_sha256 is not None
+        and sha256_of_file(action.path) != action.expected_sha256
+    ):
+        return "file changed since the scan"
+    return None
+
+
+def _free_destination(destination: Path) -> Path:
+    """``destination``, or ``name_1.ext``, ``name_2.ext``... if it is taken.
+
+    Two members of one group can share a file name (``a/photo.png`` and
+    ``b/photo.png``); moving both to the same trash path would overwrite
+    the first with the second and lose it.
+    """
+    candidate = destination
+    counter = 1
+    while candidate.exists():
+        candidate = destination.with_name(f"{destination.stem}_{counter}{destination.suffix}")
+        counter += 1
+    return candidate

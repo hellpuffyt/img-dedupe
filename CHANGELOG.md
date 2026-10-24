@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed (data loss in `apply --execute`)
+
+- A group was applied even when its kept file had been moved or deleted since
+  the scan, removing the last remaining copy. Such groups are now skipped.
+- `--trash-dir` moved same-named members of one group (`a/photo.png`,
+  `b/photo.png`) to the same trash path, so the second overwrote the first.
+  Trash names are now made unique.
+- A candidate that is the same file as a kept member (e.g. via a symlink), or
+  whose bytes changed since the scan (recorded `sha256`), is now skipped.
+- The apply summary counted planned actions as "affected" even when skipped;
+  it now counts performed ones and reports skips.
+
+### Changed
+
+- Three existing apply tests created no kept file; they now create one (the
+  behaviour they test is unchanged; without it apply now refuses, by design).
+- README: install from source; apply-time safety checks and hash verification
+  documented. Added `SECURITY.md`, `.editorconfig`, `docs/PRODUCTION_READINESS.md`.
+
 ## [0.1.0] - 2026-08-30
 
 ### Added
