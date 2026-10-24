@@ -104,7 +104,11 @@ def _compare(
         if key_a == key_b:
             continue
         winner, loser = (a, b) if key_a > key_b else (b, a)
-        winner_val, loser_val = (key_a, key_b) if key_a > key_b else (key_b, key_a)
+        if strategy == "oldest":
+            # The ranking key is the negated mtime; report the real values.
+            winner_val, loser_val = winner.mtime, loser.mtime
+        else:
+            winner_val, loser_val = (key_a, key_b) if key_a > key_b else (key_b, key_a)
         label = _STRATEGY_LABELS[strategy]
         reason = f"{winner.path.name} kept over {loser.path.name}: {label.format(winner_val, loser_val)}"
         return winner, reason
