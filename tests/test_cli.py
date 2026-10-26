@@ -157,3 +157,23 @@ def test_cli_apply_summary_counts_skipped_removals(tmp_path: Path, capsys) -> No
     out = capsys.readouterr().out
     assert victim.exists()
     assert "Applied: 0 file(s) affected (1 skipped)." in out
+
+
+def test_cli_scan_unknown_strategy_is_a_usage_error(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    # Before: an uncaught ArgumentTypeError traceback and exit 1.
+    manifest_path = tmp_path / "manifest.json"
+    try:
+        main(["scan", str(tmp_path), "-o", str(manifest_path), "--strategy-order", "resolution,biggest"])
+    except SystemExit as exc:
+        exit_code = exc.code
+    else:
+        exit_code = None
+
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "usage: img-dedupe scan" in err
+    assert "unknown strategy 'biggest'" in err
+    for name in ("compression", "file_size", "newest", "oldest", "resolution"):
+        assert name in err
+    assert not manifest_path.exists()

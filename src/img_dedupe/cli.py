@@ -57,9 +57,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         algorithm=args.algorithm,
         hash_size=args.hash_size,
         threshold=args.threshold,
-        strategy_order=_parse_strategy_order(args.strategy_order)
-        if args.strategy_order
-        else DEFAULT_STRATEGY_ORDER,
+        strategy_order=args.strategy_order or DEFAULT_STRATEGY_ORDER,
     )
     report = run_scan(settings)
     manifest = build_manifest(report)
@@ -144,6 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan_parser.add_argument(
         "--strategy-order",
+        type=_parse_strategy_order,
         default=None,
         help="comma-separated best-copy strategy order, e.g. resolution,file_size,compression,oldest",
     )

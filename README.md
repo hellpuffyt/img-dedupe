@@ -184,9 +184,9 @@ img-dedupe scan ./photos \
 | `--strategy-order` | `resolution,file_size,compression,oldest` | Best-copy strategies, from `resolution`, `file_size`, `compression`, `oldest`, `newest` |
 
 `scan` exits `2` if the directory does not exist; `apply` exits `2` if the
-manifest cannot be read or fails validation. Invalid arguments exit `2`, with
-one exception: an unknown name in `--strategy-order` currently ends in a Python
-traceback (`ArgumentTypeError`) and exit `1`.
+manifest cannot be read or fails validation. Invalid arguments exit `2` with
+a usage message, including an unknown or empty `--strategy-order`, which lists
+the valid strategy names.
 
 ### Review the manifest
 
