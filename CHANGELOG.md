@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An unknown name in `scan --strategy-order` ended in an uncaught
+  `ArgumentTypeError` traceback and exit 1; it is now a usage error (exit 2)
+  listing the valid strategy names, like the CLI's other invalid arguments.
+  An empty `--strategy-order ""` is now the same usage error instead of
+  silently falling back to the default order.
 - The `oldest` keep reason printed negated mtimes (the internal ranking key)
   instead of the files' real modification times.
 
